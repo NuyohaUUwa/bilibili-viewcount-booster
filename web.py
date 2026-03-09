@@ -8,10 +8,14 @@ import sys
 import threading
 import time as _time
 import uuid
+from datetime import datetime
 
 from flask import Flask, Response, jsonify, render_template, request
 
 app = Flask(__name__)
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORY_PATH = os.path.join(SCRIPT_DIR, './logs/run_history.log')
 
 # --- Multi-task state ---
 tasks = {}  # task_id -> TaskState
@@ -33,6 +37,7 @@ class TaskState:
         self.process = None
         self.log_queue = queue.Queue()
         self.started_at = _time.time()
+        self.history_written = False
         self.status = {
             "id": task_id, "running": True, "phase": "fetching",
             "bv": bv, "target": target,
@@ -44,6 +49,43 @@ class TaskState:
         d = dict(self.status)
         d["elapsed"] = int(_time.time() - self.started_at) if self.status["running"] else d.get("elapsed", 0)
         return d
+
+
+def _fmt_duration(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}min {seconds % 60}s"
+    return f"{seconds // 3600}h {(seconds % 3600) // 60}min"
+
+
+def _write_history(task: TaskState):
+    """Append one task result line to run_history.log (called once per task)."""
+    if task.history_written:
+        return
+    task.history_written = True
+    s = task.status
+    elapsed = s.get("elapsed", int(_time.time() - task.started_at))
+    record = {
+        "bv": task.bv,
+        "target": task.target,
+        "phase": s.get("phase", ""),
+        "elapsed": elapsed,
+        "elapsed_fmt": _fmt_duration(elapsed),
+        "hits": s.get("hits", 0),
+        "initial_views": s.get("initial_views", 0),
+        "current_views": s.get("current_views", 0),
+        "views_increase": s.get("views_increase", 0),
+        "active_proxies": s.get("active_proxies", 0),
+        "total_proxies": s.get("total_proxies", 0),
+        "started_at": datetime.fromtimestamp(task.started_at).strftime("%Y-%m-%d %H:%M:%S"),
+        "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        with open(HISTORY_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
 
 
 def get_script_dir():
@@ -100,6 +142,7 @@ def _reader(task: TaskState):
         task.status["running"] = False
         task.status["phase"] = "finished"
         task.status["elapsed"] = int(_time.time() - task.started_at)
+        _write_history(task)
         task.log_queue.put(None)
 
 
@@ -137,6 +180,7 @@ def stop_task(task_id: str) -> bool:
     task.status["running"] = False
     task.status["phase"] = "stopped"
     task.status["elapsed"] = int(_time.time() - task.started_at)
+    _write_history(task)
     return True
 
 

@@ -1,3 +1,5 @@
+import json
+import os
 import sys
 import threading
 import random
@@ -131,116 +133,51 @@ def make_cookies() -> dict:
     return cookies
 
 
-def fetch_from_proxifly() -> list[str]:
-    """Fetch HTTPS-capable proxies from proxifly's curated list."""
-    proxy_url = 'https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/https/data.json'
-    print(f'getting proxies from proxifly (HTTPS list) ...')
-    response = requests.get(proxy_url, timeout=(connect_timeout, max(read_timeout, 15)))
-    response.raise_for_status()
-    data = response.json()
-    proxies = []
-    for item in data:
-        protocol = item.get('protocol', '')
-        ip = item.get('ip', '')
-        port = item.get('port', '')
-        if not ip or not port:
-            continue
-        if protocol in ('http', 'https'):
-            proxies.append(f'{ip}:{port}')
-        elif protocol in ('socks4', 'socks5'):
-            proxies.append(f'{protocol}://{ip}:{port}')
-    print(f'successfully get {len(proxies)} HTTPS proxies from proxifly')
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROXY_SOURCES_PATH = os.path.join(SCRIPT_DIR, './data/proxy_sources.json')
+
+
+def _load_proxy_sources() -> list[dict]:
+    with open(PROXY_SOURCES_PATH, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _fetch_source(source: dict) -> list[str]:
+    """Fetch proxies from a single source entry."""
+    name = source['name']
+    url = source['url']
+    src_type = source.get('type', 'plaintext')
+    print(f'getting proxies from {name} ...')
+
+    if src_type == 'json':
+        response = requests.get(url, timeout=(connect_timeout, max(read_timeout, 15)))
+        response.raise_for_status()
+        data = response.json()
+        proxies = []
+        for item in data:
+            protocol = item.get('protocol', '')
+            ip = item.get('ip', '')
+            port = item.get('port', '')
+            if not ip or not port:
+                continue
+            if protocol in ('http', 'https'):
+                proxies.append(f'{ip}:{port}')
+            elif protocol in ('socks4', 'socks5'):
+                proxies.append(f'{protocol}://{ip}:{port}')
+    elif src_type == 'geonode':
+        params = {'limit': 300, 'page': 1, 'sort_by': 'lastChecked',
+                  'sort_type': 'desc', 'protocols': 'http'}
+        response = requests.get(url, params=params, timeout=(connect_timeout, read_timeout))
+        response.raise_for_status()
+        items = response.json().get('data', [])
+        proxies = [f"{it['ip']}:{it['port']}" for it in items if it.get('ip') and it.get('port')]
+    else:
+        response = requests.get(url, timeout=(connect_timeout, read_timeout))
+        response.raise_for_status()
+        proxies = [line.strip() for line in response.text.splitlines() if line.strip() and ':' in line]
+
+    print(f'successfully get {len(proxies)} proxies from {name}')
     return proxies
-
-
-def fetch_from_proxyscrape() -> list[str]:
-    proxy_url = ('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http'
-                 '&timeout=2000&country=all')
-    print(f'getting proxies from {proxy_url} ...')
-    response = requests.get(proxy_url, timeout=(connect_timeout, read_timeout))
-    response.raise_for_status()
-    proxies = [line.strip() for line in response.text.splitlines() if line.strip()]
-    print(f'successfully get {len(proxies)} proxies from proxyscrape')
-    return proxies
-
-
-def fetch_from_proxylistdownload() -> list[str]:
-    proxy_url = 'https://www.proxy-list.download/api/v1/get?type=http'
-    print(f'getting proxies from {proxy_url} ...')
-    response = requests.get(proxy_url, timeout=(connect_timeout, read_timeout))
-    response.raise_for_status()
-    proxies = [line.strip() for line in response.text.splitlines() if line.strip()]
-    print(f'successfully get {len(proxies)} proxies from proxy-list.download')
-    return proxies
-
-
-def fetch_from_geonode(limit: int = 300) -> list[str]:
-    proxy_url = 'https://proxylist.geonode.com/api/proxy-list'
-    params = {
-        'limit': limit,
-        'page': 1,
-        'sort_by': 'lastChecked',
-        'sort_type': 'desc',
-        'protocols': 'http',
-    }
-    print(f'getting proxies from {proxy_url} ...')
-    response = requests.get(proxy_url, params=params, timeout=(connect_timeout, read_timeout))
-    response.raise_for_status()
-    data = response.json().get('data', [])
-    proxies = [f"{item['ip']}:{item['port']}" for item in data if item.get('ip') and item.get('port')]
-    print(f'successfully get {len(proxies)} proxies from geonode')
-    return proxies
-
-
-def fetch_plaintext_proxy_list(url: str, label: str) -> list[str]:
-    print(f'getting proxies from {url} ...')
-    response = requests.get(url, timeout=(connect_timeout, read_timeout))
-    response.raise_for_status()
-    proxies = [line.strip() for line in response.text.splitlines() if line.strip() and ':' in line]
-    print(f'successfully get {len(proxies)} proxies from {label}')
-    return proxies
-
-
-def fetch_from_speedx() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt',
-        'TheSpeedX GitHub list')
-
-
-def fetch_from_monosans() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt',
-        'monosans GitHub list')
-
-
-def fetch_from_kangproxy() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/officialputuid/KangProxy/master/https/https.txt',
-        'KangProxy GitHub list')
-
-
-def fetch_from_clarketm() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt',
-        'clarketm GitHub list')
-
-
-def fetch_from_hookzof() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt',
-        'hookzof socks5 list')
-
-
-def fetch_from_sunny9577() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://sunny9577.github.io/proxy-scraper/proxies.txt',
-        'sunny9577 proxy list')
-
-
-def fetch_from_miralay() -> list[str]:
-    return fetch_plaintext_proxy_list(
-        'https://raw.githubusercontent.com/themiralay/Proxy-List-World/master/data.txt',
-        'Proxy-List-World')
 
 
 def build_view_params(video_id: str) -> dict[str, str]:
@@ -279,27 +216,19 @@ def fetch_video_info(video_id: str) -> dict:
     return data
 
 
-FETCHERS = [
-    ('proxifly', fetch_from_proxifly),
-    ('proxyscrape', fetch_from_proxyscrape),
-    ('proxy-list.download', fetch_from_proxylistdownload),
-    ('geonode', fetch_from_geonode),
-    ('speedx', fetch_from_speedx),
-    ('monosans', fetch_from_monosans),
-    ('kangproxy', fetch_from_kangproxy),
-    ('clarketm', fetch_from_clarketm),
-    ('hookzof', fetch_from_hookzof),
-    ('sunny9577', fetch_from_sunny9577),
-    ('miralay', fetch_from_miralay),
-]
-
-
 def fetch_all_proxies(quiet: bool = False) -> set[str]:
-    """Fetch proxies from all sources, returns a set of proxy strings."""
+    """Fetch proxies from all sources defined in proxy_sources.json."""
+    sources = _load_proxy_sources()
     all_proxies: set[str] = set()
-    for name, fetcher in FETCHERS:
+    for source in sources:
+        name = source.get('name', source.get('url', '?'))
         try:
-            proxies = fetcher() if not quiet else _fetch_quiet(fetcher)
+            if quiet:
+                import io, contextlib
+                with contextlib.redirect_stdout(io.StringIO()):
+                    proxies = _fetch_source(source)
+            else:
+                proxies = _fetch_source(source)
         except RequestException as err:
             if not quiet:
                 print(f'{name} source failed: {err}')
@@ -310,13 +239,6 @@ def fetch_all_proxies(quiet: bool = False) -> set[str]:
             continue
         all_proxies.update(proxies)
     return all_proxies
-
-
-def _fetch_quiet(fetcher):
-    """Run a fetcher with stdout suppressed (for incremental refresh)."""
-    import io, contextlib
-    with contextlib.redirect_stdout(io.StringIO()):
-        return fetcher()
 
 
 def build_proxy_dict(proxy: str) -> dict[str, str]:
