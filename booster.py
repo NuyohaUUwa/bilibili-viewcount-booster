@@ -1,6 +1,11 @@
 import sys
 import threading
 import random
+import time as _time
+import uuid as _uuid
+import urllib.parse
+from functools import reduce
+from hashlib import md5
 from time import sleep
 from typing import Optional
 from datetime import datetime
@@ -10,18 +15,120 @@ from requests.exceptions import RequestException
 from fake_useragent import UserAgent
 
 # parameters
-IS_TTY = sys.stdout.isatty()  # False when piped (e.g. by web.py), use line-by-line output
-connect_timeout = 5   # seconds for proxy TCP + TLS handshake
-read_timeout = 10     # seconds for waiting server response after connection
-thread_num = 75  # thread count for filtering active proxies
-round_time = 305  # seconds for each round of view count boosting
-update_pbar_count = 10  # update view count progress bar for every xx proxies
-bv = sys.argv[1]  # video BV/AV id (raw input)
-target = int(sys.argv[2])  # target view count
+IS_TTY = sys.stdout.isatty()
+connect_timeout = 5
+read_timeout = 10
+thread_num = 75
+round_time = 305
+update_pbar_count = 10
+bv = sys.argv[1]
+target = int(sys.argv[2])
 
-# statistics tracking parameters
-successful_hits = 0  # count of successful proxy requests
-initial_view_count = 0  # starting view count
+successful_hits = 0
+initial_view_count = 0
+
+# --------------- WBI signature ---------------
+MIXIN_KEY_ENC_TAB = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+    61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+    36, 20, 34, 44, 52,
+]
+
+_wbi_keys_cache: dict = {"img_key": "", "sub_key": "", "ts": 0}
+
+
+def _get_mixin_key(orig: str) -> str:
+    return reduce(lambda s, i: s + orig[i], MIXIN_KEY_ENC_TAB, '')[:32]
+
+
+def get_wbi_keys(ua: str) -> tuple[str, str]:
+    """Fetch WBI img_key and sub_key from nav API, cached for 12h."""
+    now = _time.time()
+    if _wbi_keys_cache["img_key"] and now - _wbi_keys_cache["ts"] < 43200:
+        return _wbi_keys_cache["img_key"], _wbi_keys_cache["sub_key"]
+    resp = requests.get(
+        'https://api.bilibili.com/x/web-interface/nav',
+        headers={'User-Agent': ua},
+        timeout=(connect_timeout, read_timeout),
+    )
+    data = resp.json().get('data', {}).get('wbi_img', {})
+    img_key = data.get('img_url', '').rsplit('/', 1)[-1].split('.')[0]
+    sub_key = data.get('sub_url', '').rsplit('/', 1)[-1].split('.')[0]
+    _wbi_keys_cache.update(img_key=img_key, sub_key=sub_key, ts=now)
+    return img_key, sub_key
+
+
+def sign_wbi(params: dict, img_key: str, sub_key: str) -> dict:
+    """Add w_rid and wts to params using WBI signing."""
+    mixin_key = _get_mixin_key(img_key + sub_key)
+    curr_time = round(_time.time())
+    params['wts'] = curr_time
+    params = dict(sorted(params.items()))
+    params = {
+        k: ''.join(c for c in str(v) if c not in "!'()*")
+        for k, v in params.items()
+    }
+    query = urllib.parse.urlencode(params)
+    params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
+    return params
+
+
+# --------------- Device fingerprint generators ---------------
+
+_buvid_pool: list[tuple[str, str]] = []
+_buvid_pool_lock = threading.Lock()
+BUVID_POOL_SIZE = 20
+
+
+def _fill_buvid_pool():
+    """Pre-fetch a batch of buvid3/buvid4 pairs from the SPI endpoint."""
+    fetched = []
+    for _ in range(BUVID_POOL_SIZE):
+        try:
+            resp = requests.get(
+                'https://api.bilibili.com/x/frontend/finger/spi',
+                timeout=(connect_timeout, read_timeout),
+            )
+            d = resp.json().get('data', {})
+            fetched.append((d.get('b_3', ''), d.get('b_4', '')))
+        except Exception:
+            break
+    with _buvid_pool_lock:
+        _buvid_pool.extend(fetched)
+
+
+def gen_buvid() -> tuple[str, str]:
+    """Get a buvid3/buvid4 pair, from pool or locally generated."""
+    with _buvid_pool_lock:
+        if _buvid_pool:
+            return _buvid_pool.pop()
+    ts = str(int(_time.time() * 1000 % 1e5)).rjust(5, '0')
+    return f'{_uuid.uuid4()}{ts}infoc', ''
+
+
+def gen_uuid_cookie() -> str:
+    return f'{_uuid.uuid4()}{str(int(_time.time() * 1000 % 1e5)).rjust(5, "0")}infoc'
+
+
+def gen_b_lsid() -> str:
+    hex8 = ''.join(random.choice('0123456789ABCDEF') for _ in range(8))
+    ts_hex = hex(int(_time.time() * 1000)).upper()[2:]
+    return f'{hex8}_{ts_hex}'
+
+
+def make_cookies() -> dict:
+    buvid3, buvid4 = gen_buvid()
+    cookies = {
+        'buvid3': buvid3,
+        '_uuid': gen_uuid_cookie(),
+        'b_lsid': gen_b_lsid(),
+        'b_nut': str(int(_time.time())),
+        'CURRENT_FNVAL': '4048',
+    }
+    if buvid4:
+        cookies['buvid4'] = buvid4
+    return cookies
 
 
 def fetch_from_proxifly() -> list[str]:
@@ -225,16 +332,13 @@ def filter_proxy_list(proxies: list[str], label: str = '') -> list[str]:
     Returns the list of active proxies."""
     if not proxies:
         return []
-    _count = [0]
+    _done = [0]
     _total = len(proxies)
     _active: list[str] = []
     _lock = threading.Lock()
 
     def _test_batch(batch: list[str]):
         for proxy in batch:
-            with _lock:
-                _count[0] += 1
-                idx = _count[0]
             try:
                 requests.post('https://httpbin.org/post',
                               proxies=build_proxy_dict(proxy),
@@ -244,7 +348,10 @@ def filter_proxy_list(proxies: list[str], label: str = '') -> list[str]:
             except Exception:
                 pass
             if label:
-                print(f'{label} {idx}/{_total} {100*idx/_total:.1f}%   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
+                with _lock:
+                    _done[0] += 1
+                    n = _done[0]
+                print(f'{label} {n}/{_total} {100*n/_total:.1f}%   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
 
     n_threads = min(thread_num, _total)
     batch_size = _total // n_threads
@@ -302,12 +409,11 @@ print(f'\nsuccessfully filter {len(active_proxies)} HTTPS-capable active proxies
 # 3.boost view count
 print(f'\nstart boosting {bv} at {datetime.now().strftime("%H:%M:%S")}')
 current = 0
-info = {}  # Initialize info dictionary
+info = {}
 
-# Get initial view count
 try:
     info = fetch_video_info(bv)
-    bv = info['bvid']  # ensure BV id is normalized for later requests
+    bv = info['bvid']
     initial_view_count = info['stat']['view']
     current = initial_view_count
     print(f'Initial view count: {initial_view_count}')
@@ -315,12 +421,34 @@ except Exception as e:
     print(f'Failed to get initial view count: {e}')
     sys.exit(1)
 
-fail_counter: dict[str, int] = {}  # proxy -> consecutive fail count
+# Fetch WBI keys for signing
+default_ua = UserAgent().random
+try:
+    img_key, sub_key = get_wbi_keys(default_ua)
+    print(f'WBI keys acquired')
+except Exception as e:
+    print(f'Warning: failed to get WBI keys: {e}')
+    img_key, sub_key = '', ''
+
+# Pre-fill buvid pool for device fingerprinting
+print('pre-fetching device fingerprints...')
+_fill_buvid_pool()
+print(f'{len(_buvid_pool)} device fingerprints ready')
+
+fail_counter: dict[str, int] = {}
 
 while True:
     reach_target = False
     start_time = datetime.now()
     dead_this_round: list[str] = []
+
+    # Refresh WBI keys and buvid pool each round
+    try:
+        img_key, sub_key = get_wbi_keys(default_ua)
+    except Exception:
+        pass
+    if len(_buvid_pool) < 5:
+        threading.Thread(target=_fill_buvid_pool, daemon=True).start()
 
     for i, proxy in enumerate(active_proxies):
         try:
@@ -333,20 +461,58 @@ while True:
                     print(f'{pbar(current, target, successful_hits, current - initial_view_count)} done                 ', end='' if IS_TTY else '\n', flush=not IS_TTY)
                     break
 
-            requests.post('https://api.bilibili.com/x/click-interface/click/web/h5',
+            ua = UserAgent().random
+            now_ts = round(_time.time())
+            ftime = now_ts - random.randint(2, 5)
+            stime = ftime - random.randint(0, 2)
+
+            cookies = make_cookies()
+            aid = str(info['aid'])
+            cid = str(info['cid'])
+
+            query_params = {
+                'w_aid': aid,
+                'w_part': '1',
+                'w_ftime': str(ftime),
+                'w_stime': str(stime),
+                'w_type': '3',
+                'web_location': '1315873',
+            }
+            if img_key and sub_key:
+                query_params = sign_wbi(query_params, img_key, sub_key)
+
+            post_data = {
+                'aid': aid,
+                'cid': cid,
+                'part': '1',
+                'lv': '0',
+                'ftime': str(ftime),
+                'stime': str(stime),
+                'type': '3',
+                'sub_type': '0',
+                'refer_url': f'https://www.bilibili.com/video/{bv}/',
+                'outer': '0',
+                'spmid': '333.788.0.0',
+                'from_spmid': '',
+            }
+
+            headers = {
+                'User-Agent': ua,
+                'Referer': f'https://www.bilibili.com/video/{bv}/',
+                'Origin': 'https://www.bilibili.com',
+                'Content-Type': 'application/x-www-form-urlencoded',
+            }
+
+            url = 'https://api.bilibili.com/x/click-interface/click/web/h5'
+            if query_params:
+                url += '?' + urllib.parse.urlencode(query_params)
+
+            requests.post(url,
                           proxies=build_proxy_dict(proxy),
-                          headers={'User-Agent': UserAgent().random},
+                          headers=headers,
+                          cookies=cookies,
                           timeout=(connect_timeout, read_timeout),
-                          data={
-                              'aid': info['aid'],
-                              'cid': info['cid'],
-                              'bvid': bv,
-                              'part': '1',
-                              'mid': info['owner']['mid'],
-                              'jsonp': 'jsonp',
-                              'type': info['desc_v2'][0]['type'] if info['desc_v2'] else '1',
-                              'sub_type': '0'
-                          })
+                          data=post_data)
             successful_hits += 1
             fail_counter[proxy] = 0
             print(f'{pbar(current, target, successful_hits, current - initial_view_count)} proxy({i+1}/{len(active_proxies)}) success   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
