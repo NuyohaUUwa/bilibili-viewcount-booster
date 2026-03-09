@@ -6,32 +6,33 @@
   <title>B站播放量 - Booster</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      max-width: 960px; margin: 0 auto; padding: 24px; background: #f5f5f5;
-    }
-    h1 { font-size: 1.5rem; margin-bottom: 20px; }
-    .form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; align-items: center; }
-    .form input { padding: 9px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-    .form input[type="text"] { width: 220px; }
-    .form input[type="number"] { width: 120px; }
-    .form button { padding: 9px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; color: #fff; }
-    .form button:disabled { cursor: not-allowed; opacity: 0.55; }
-    .btn-start { background: #0a7; }
-    .btn-stop { background: #c33; }
-    .cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
-    .card { background: #fff; padding: 12px 16px; border-radius: 8px; min-width: 110px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    .card .label { font-size: 11px; color: #888; margin-bottom: 3px; }
-    .card .value { font-size: 17px; font-weight: 600; }
-    .log-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-    .log-header span { font-size: 13px; color: #666; }
-    .btn-detail { padding: 5px 14px; border: 1px solid #aaa; border-radius: 5px; background: #fff; font-size: 12px; cursor: pointer; }
-    .btn-detail.active { background: #333; color: #fff; border-color: #333; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 960px; margin: 0 auto; padding: 24px; background: #f5f5f5; }
+    h1 { font-size: 1.5rem; margin-bottom: 18px; }
+    .new-task { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; align-items: center; }
+    .new-task input { padding: 9px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    .new-task input[type="text"] { width: 220px; }
+    .new-task input[type="number"] { width: 120px; }
+    .new-task button { padding: 9px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; color: #fff; background: #0a7; }
+    .new-task button:disabled { cursor: not-allowed; opacity: .55; }
+    .no-tasks { color: #999; font-size: 14px; padding: 40px 0; text-align: center; }
+    .task { background: #fff; border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+    .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+    .task-title { font-weight: 600; font-size: 14px; }
+    .task-title .tid { color: #aaa; font-weight: 400; margin-left: 6px; font-size: 12px; }
+    .task-actions button { padding: 5px 14px; border: none; border-radius: 5px; font-size: 12px; cursor: pointer; margin-left: 6px; }
+    .task-actions .btn-stop { background: #c33; color: #fff; }
+    .task-actions .btn-remove { background: #888; color: #fff; }
+    .task-actions .btn-detail { background: #fff; color: #333; border: 1px solid #aaa; }
+    .task-actions .btn-detail.active { background: #333; color: #fff; border-color: #333; }
+    .cards { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .card { background: #f8f8f8; padding: 8px 12px; border-radius: 6px; min-width: 90px; }
+    .card .label { font-size: 10px; color: #888; }
+    .card .value { font-size: 15px; font-weight: 600; }
     .log-panel {
       background: #1a1a2e; color: #d4d4d4;
-      font-family: "Consolas", "Monaco", "Courier New", monospace; font-size: 12.5px;
-      padding: 14px; border-radius: 8px; height: 380px; overflow-y: auto;
-      white-space: pre-wrap; word-break: break-all; line-height: 1.45;
+      font-family: "Consolas", "Monaco", "Courier New", monospace; font-size: 12px;
+      padding: 12px; border-radius: 8px; height: 260px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-all; line-height: 1.4;
     }
     .log-panel .collapsed { display: none; }
     .log-panel .progress-line { color: #8a8; }
@@ -43,49 +44,36 @@
 <body>
   <h1>B站播放量刷量</h1>
 
-  <div class="form">
+  <div class="new-task">
     <input type="text" id="bv" placeholder="BV号或AV号" />
     <input type="number" id="target" placeholder="目标播放量" min="1" value="1000" />
-    <button class="btn-start" id="btnStart">开始</button>
-    <button class="btn-stop" id="btnStop" disabled>停止</button>
+    <button id="btnAdd">添加任务</button>
   </div>
 
-  <div class="cards">
-    <div class="card"><div class="label">阶段</div><div class="value" id="phase">空闲</div></div>
-    <div class="card"><div class="label">成功次数</div><div class="value" id="hits">0</div></div>
-    <div class="card"><div class="label">当前播放量</div><div class="value" id="views">-</div></div>
-    <div class="card"><div class="label">播放增量</div><div class="value" id="viewsInc">0</div></div>
-    <div class="card"><div class="label">代理总数</div><div class="value" id="totalProxies">0</div></div>
-    <div class="card"><div class="label">可用代理</div><div class="value" id="activeProxies">0</div></div>
-  </div>
-
-  <div class="log-header">
-    <span>运行日志</span>
-    <button class="btn-detail" id="btnDetail">详细</button>
-  </div>
-  <div class="log-panel" id="logPanel"></div>
+  <div id="taskList"><div class="no-tasks">暂无任务</div></div>
 
 <script>
-const $ = id => document.getElementById(id);
-const bvInput = $('bv'), targetInput = $('target');
-const btnStart = $('btnStart'), btnStop = $('btnStop'), btnDetail = $('btnDetail');
-const phaseEl = $('phase'), hitsEl = $('hits'), viewsEl = $('views'), viewsIncEl = $('viewsInc');
-const totalProxiesEl = $('totalProxies'), activeProxiesEl = $('activeProxies');
-const logPanel = $('logPanel');
+const bvInput = document.getElementById('bv');
+const targetInput = document.getElementById('target');
+const btnAdd = document.getElementById('btnAdd');
+const taskListEl = document.getElementById('taskList');
 
-let evtSource = null;
-let detailMode = false;
-let allLines = [];
+const taskMap = {};  // task_id -> { el, evtSource, allLines, detailMode, timerInterval }
 
+const PROXY_LINE_RE = /proxy\(\d+\/\d+\)\s+(success|fail)/;
 const PROGRESS_RE = /^\d+\/\d+\s.*━/;
 const NEXT_ROUND_RE = /next round:/;
-const FILTER_PROGRESS_RE = /^\d+\/\d+\s.*\d+\.\d+%/;
+const FILTER_PROGRESS_RE = /\d+\/\d+\s.*\d+\.\d+%/;
 
 function isRepetitiveLine(line) {
-  return PROGRESS_RE.test(line) || NEXT_ROUND_RE.test(line) || FILTER_PROGRESS_RE.test(line);
+  return PROGRESS_RE.test(line) || NEXT_ROUND_RE.test(line) || FILTER_PROGRESS_RE.test(line) || PROXY_LINE_RE.test(line);
 }
 
 function classifyLine(line) {
+  if (PROXY_LINE_RE.test(line)) return /success/.test(line) ? 'success-line' : 'fail-line';
+  if (/removed \d+ dead proxies/i.test(line)) return 'fail-line';
+  if (/added \d+ new active proxies/i.test(line)) return 'success-line';
+  if (/refreshing proxy pool|no new|proxy refresh failed/i.test(line)) return 'info-line';
   if (/success/i.test(line)) return 'success-line';
   if (/fail/i.test(line)) return 'fail-line';
   if (/successfully|collected|Initial|Finish|Statistics/i.test(line)) return 'info-line';
@@ -93,116 +81,196 @@ function classifyLine(line) {
   return '';
 }
 
-function renderLogs() {
-  logPanel.innerHTML = '';
-  let lastRepetitiveIdx = -1;
-  if (!detailMode) {
-    for (let i = allLines.length - 1; i >= 0; i--) {
-      if (isRepetitiveLine(allLines[i])) { lastRepetitiveIdx = i; break; }
-    }
-  }
-  for (let i = 0; i < allLines.length; i++) {
-    const line = allLines[i];
-    const span = document.createElement('span');
-    span.textContent = line + '\n';
-    const cls = classifyLine(line);
-    if (cls) span.className = cls;
-    if (!detailMode && isRepetitiveLine(line) && i !== lastRepetitiveIdx) {
-      span.className += ' collapsed';
-    }
-    logPanel.appendChild(span);
-  }
-  logPanel.scrollTop = logPanel.scrollHeight;
+function fmtTime(sec) {
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec/60) + 'min ' + (sec%60) + 's';
+  return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'min';
 }
 
-function appendLine(line) {
-  allLines.push(line);
+const PHASE_MAP = { idle: '空闲', fetching: '拉取代理', filtering: '筛选代理', boosting: '刷量中', refreshing: '刷新代理', finished: '已完成', stopped: '已停止' };
+
+function createTaskEl(taskId, bv, target) {
+  const div = document.createElement('div');
+  div.className = 'task';
+  div.id = 'task-' + taskId;
+  div.innerHTML = `
+    <div class="task-header">
+      <span class="task-title">${bv} → ${target}<span class="tid">#${taskId}</span></span>
+      <span class="task-actions">
+        <button class="btn-detail" data-id="${taskId}">详细</button>
+        <button class="btn-stop" data-id="${taskId}">停止</button>
+        <button class="btn-remove" data-id="${taskId}">删除</button>
+      </span>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="label">阶段</div><div class="value phase">拉取代理</div></div>
+      <div class="card"><div class="label">运行时长</div><div class="value elapsed">0s</div></div>
+      <div class="card"><div class="label">成功次数</div><div class="value hits">0</div></div>
+      <div class="card"><div class="label">播放量</div><div class="value views">-</div></div>
+      <div class="card"><div class="label">增量</div><div class="value viewsInc">0</div></div>
+      <div class="card"><div class="label">代理</div><div class="value proxies">0/0</div></div>
+    </div>
+    <div class="log-panel" data-id="${taskId}"></div>
+  `;
+  div.querySelector('.btn-stop').onclick = () => stopTask(taskId);
+  div.querySelector('.btn-remove').onclick = () => removeTask(taskId);
+  div.querySelector('.btn-detail').onclick = function() {
+    const t = taskMap[taskId]; if (!t) return;
+    t.detailMode = !t.detailMode;
+    this.classList.toggle('active', t.detailMode);
+    this.textContent = t.detailMode ? '精简' : '详细';
+    renderLogs(taskId);
+  };
+  return div;
+}
+
+function updateTaskUI(taskId, s) {
+  const t = taskMap[taskId]; if (!t) return;
+  const el = t.el;
+  el.querySelector('.phase').textContent = PHASE_MAP[s.phase] || s.phase || '';
+  el.querySelector('.hits').textContent = s.hits ?? 0;
+  const cv = s.current_views ?? 0;
+  el.querySelector('.views').textContent = cv > 0 ? cv : '-';
+  el.querySelector('.viewsInc').textContent = s.views_increase ?? 0;
+  el.querySelector('.proxies').textContent = (s.active_proxies??0) + '/' + (s.total_proxies??0);
+  if (s.elapsed !== undefined) el.querySelector('.elapsed').textContent = fmtTime(s.elapsed);
+  const stopBtn = el.querySelector('.btn-stop');
+  stopBtn.disabled = !s.running;
+  stopBtn.style.opacity = s.running ? '1' : '.4';
+}
+
+function renderLogs(taskId) {
+  const t = taskMap[taskId]; if (!t) return;
+  const panel = t.el.querySelector('.log-panel');
+  panel.innerHTML = '';
+  const lines = t.allLines;
+  let lastRepIdx = -1;
+  if (!t.detailMode) {
+    for (let i = lines.length - 1; i >= 0; i--) { if (isRepetitiveLine(lines[i])) { lastRepIdx = i; break; } }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const span = document.createElement('span');
+    span.textContent = lines[i] + '\n';
+    const cls = classifyLine(lines[i]);
+    if (cls) span.className = cls;
+    if (!t.detailMode && isRepetitiveLine(lines[i]) && i !== lastRepIdx) span.className += ' collapsed';
+    panel.appendChild(span);
+  }
+  panel.scrollTop = panel.scrollHeight;
+}
+
+function appendLine(taskId, line) {
+  const t = taskMap[taskId]; if (!t) return;
+  t.allLines.push(line);
+  const panel = t.el.querySelector('.log-panel');
   const isRep = isRepetitiveLine(line);
-  if (!detailMode && isRep) {
-    const spans = logPanel.querySelectorAll('span.progress-line:not(.collapsed)');
-    spans.forEach(s => { if (!s.classList.contains('collapsed')) s.classList.add('collapsed'); });
+  if (!t.detailMode && isRep) {
+    const visible = panel.querySelectorAll('span.progress-line:not(.collapsed), span.success-line:not(.collapsed), span.fail-line:not(.collapsed)');
+    visible.forEach(s => { if (isRepetitiveLine(s.textContent.trim())) s.classList.add('collapsed'); });
   }
   const span = document.createElement('span');
   span.textContent = line + '\n';
   const cls = classifyLine(line);
   if (cls) span.className = cls;
-  logPanel.appendChild(span);
-  logPanel.scrollTop = logPanel.scrollHeight;
+  panel.appendChild(span);
+  panel.scrollTop = panel.scrollHeight;
 }
 
-function setRunning(running) {
-  btnStart.disabled = running;
-  btnStop.disabled = !running;
-}
-
-const PHASE_MAP = { idle: '空闲', fetching: '拉取代理', filtering: '筛选代理', boosting: '刷量中' };
-
-function updateStatus(s) {
-  if (!s) return;
-  phaseEl.textContent = PHASE_MAP[s.phase] || s.phase || '空闲';
-  hitsEl.textContent = s.hits ?? 0;
-  const cv = s.current_views ?? 0;
-  viewsEl.textContent = cv > 0 ? cv : '-';
-  viewsIncEl.textContent = s.views_increase ?? 0;
-  totalProxiesEl.textContent = s.total_proxies ?? 0;
-  activeProxiesEl.textContent = s.active_proxies ?? 0;
-  if (s.running !== undefined) setRunning(s.running);
-}
-
-function connectStream() {
-  if (evtSource) evtSource.close();
-  evtSource = new EventSource('/stream');
-  evtSource.onmessage = function(e) {
+function connectStream(taskId) {
+  const t = taskMap[taskId]; if (!t) return;
+  if (t.evtSource) t.evtSource.close();
+  const es = new EventSource('/stream/' + taskId);
+  t.evtSource = es;
+  es.onmessage = function(e) {
     try {
       const d = JSON.parse(e.data);
       if (d.type === 'log') {
-        appendLine(d.line);
-        if (d.status) updateStatus(d.status);
+        appendLine(taskId, d.line);
+        if (d.status) updateTaskUI(taskId, d.status);
       } else if (d.type === 'done') {
-        appendLine('[任务结束]');
-        updateStatus(d);
-        setRunning(false);
+        appendLine(taskId, '[任务结束]');
+        updateTaskUI(taskId, d);
+        clearInterval(t.timerInterval);
+        es.close();
       } else if (d.type === 'heartbeat') {
-        updateStatus(d);
+        updateTaskUI(taskId, d);
       }
-    } catch (_) {}
+    } catch(_) {}
   };
-  evtSource.onerror = function() { evtSource.close(); setTimeout(connectStream, 2000); };
+  es.onerror = function() { es.close(); setTimeout(() => connectStream(taskId), 3000); };
 }
 
-btnDetail.onclick = function() {
-  detailMode = !detailMode;
-  btnDetail.classList.toggle('active', detailMode);
-  btnDetail.textContent = detailMode ? '精简' : '详细';
-  renderLogs();
-};
+function startTimerTick(taskId) {
+  const t = taskMap[taskId]; if (!t) return;
+  const startedAt = t.startedAt;
+  t.timerInterval = setInterval(() => {
+    const el = t.el.querySelector('.elapsed');
+    if (el) el.textContent = fmtTime(Math.floor(Date.now()/1000 - startedAt));
+  }, 1000);
+}
 
-btnStart.onclick = async function() {
+function refreshNoTasks() {
+  const existing = taskListEl.querySelector('.no-tasks');
+  if (Object.keys(taskMap).length === 0) {
+    if (!existing) taskListEl.innerHTML = '<div class="no-tasks">暂无任务</div>';
+  } else {
+    if (existing) existing.remove();
+  }
+}
+
+btnAdd.onclick = async function() {
   const bv = bvInput.value.trim(), t = parseInt(targetInput.value, 10);
   if (!bv) { alert('请输入BV号或AV号'); return; }
   if (isNaN(t) || t < 1) { alert('请输入有效的目标播放量'); return; }
+  btnAdd.disabled = true;
   try {
-    const res = await fetch('/start', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bv, target: t })
-    });
+    const res = await fetch('/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({bv, target:t}) });
     const j = await res.json();
-    if (j.ok) { setRunning(true); allLines = []; logPanel.innerHTML = ''; appendLine('开始: ' + bv + ' -> 目标 ' + t); }
-    else alert(j.message || '启动失败');
-  } catch (err) { alert('请求失败: ' + err.message); }
+    if (!j.ok) { alert(j.message || '启动失败'); return; }
+    const taskId = j.task_id;
+    const el = createTaskEl(taskId, bv, t);
+    refreshNoTasks();
+    taskListEl.appendChild(el);
+    taskMap[taskId] = { el, evtSource: null, allLines: [], detailMode: false, timerInterval: null, startedAt: Date.now()/1000 };
+    refreshNoTasks();
+    connectStream(taskId);
+    startTimerTick(taskId);
+  } catch(err) { alert('请求失败: ' + err.message); }
+  finally { btnAdd.disabled = false; }
 };
 
-btnStop.onclick = async function() {
-  try {
-    const res = await fetch('/stop', { method: 'POST' });
-    const j = await res.json();
-    if (j.ok) setRunning(false);
-  } catch (err) { alert('请求失败: ' + err.message); }
-};
+async function stopTask(taskId) {
+  try { await fetch('/stop/' + taskId, {method:'POST'}); } catch(_) {}
+  const t = taskMap[taskId];
+  if (t) { clearInterval(t.timerInterval); }
+}
+
+async function removeTask(taskId) {
+  try { await fetch('/remove/' + taskId, {method:'POST'}); } catch(_) {}
+  const t = taskMap[taskId];
+  if (t) {
+    if (t.evtSource) t.evtSource.close();
+    clearInterval(t.timerInterval);
+    t.el.remove();
+    delete taskMap[taskId];
+    refreshNoTasks();
+  }
+}
 
 (async function init() {
-  try { const r = await fetch('/status'); updateStatus(await r.json()); } catch(_) {}
-  connectStream();
+  try {
+    const res = await fetch('/tasks');
+    const list = await res.json();
+    for (const s of list) {
+      const el = createTaskEl(s.id, s.bv, s.target);
+      refreshNoTasks();
+      taskListEl.appendChild(el);
+      taskMap[s.id] = { el, evtSource: null, allLines: [], detailMode: false, timerInterval: null, startedAt: s.started_at };
+      updateTaskUI(s.id, s);
+      refreshNoTasks();
+      if (s.running) { connectStream(s.id); startTimerTick(s.id); }
+    }
+  } catch(_) {}
 })();
 </script>
 </body>

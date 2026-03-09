@@ -3,7 +3,7 @@ import threading
 import random
 from time import sleep
 from typing import Optional
-from datetime import date, datetime, timedelta
+from datetime import datetime
 
 import requests
 from requests.exceptions import RequestException
@@ -172,32 +172,96 @@ def fetch_video_info(video_id: str) -> dict:
     return data
 
 
-def get_total_proxies() -> list[str]:
-    fetchers = [
-        ('proxifly', fetch_from_proxifly),
-        ('proxyscrape', fetch_from_proxyscrape),
-        ('proxy-list.download', fetch_from_proxylistdownload),
-        ('geonode', fetch_from_geonode),
-        ('speedx', fetch_from_speedx),
-        ('monosans', fetch_from_monosans),
-        ('kangproxy', fetch_from_kangproxy),
-        ('clarketm', fetch_from_clarketm),
-        ('hookzof', fetch_from_hookzof),
-        ('sunny9577', fetch_from_sunny9577),
-        ('miralay', fetch_from_miralay),
-    ]
+FETCHERS = [
+    ('proxifly', fetch_from_proxifly),
+    ('proxyscrape', fetch_from_proxyscrape),
+    ('proxy-list.download', fetch_from_proxylistdownload),
+    ('geonode', fetch_from_geonode),
+    ('speedx', fetch_from_speedx),
+    ('monosans', fetch_from_monosans),
+    ('kangproxy', fetch_from_kangproxy),
+    ('clarketm', fetch_from_clarketm),
+    ('hookzof', fetch_from_hookzof),
+    ('sunny9577', fetch_from_sunny9577),
+    ('miralay', fetch_from_miralay),
+]
+
+
+def fetch_all_proxies(quiet: bool = False) -> set[str]:
+    """Fetch proxies from all sources, returns a set of proxy strings."""
     all_proxies: set[str] = set()
-    for name, fetcher in fetchers:
+    for name, fetcher in FETCHERS:
         try:
-            proxies = fetcher()
+            proxies = fetcher() if not quiet else _fetch_quiet(fetcher)
         except RequestException as err:
-            print(f'{name} source failed: {err}')
+            if not quiet:
+                print(f'{name} source failed: {err}')
             continue
         except Exception as err:
-            print(f'{name} source error: {err}')
+            if not quiet:
+                print(f'{name} source error: {err}')
             continue
-        for proxy in proxies:
-            all_proxies.add(proxy)
+        all_proxies.update(proxies)
+    return all_proxies
+
+
+def _fetch_quiet(fetcher):
+    """Run a fetcher with stdout suppressed (for incremental refresh)."""
+    import io, contextlib
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fetcher()
+
+
+def build_proxy_dict(proxy: str) -> dict[str, str]:
+    """Build a requests-compatible proxies dict supporting http, https, socks4, socks5."""
+    if proxy.startswith('socks5://') or proxy.startswith('socks4://'):
+        return {'http': proxy, 'https': proxy}
+    proxy_url = 'http://' + proxy
+    return {'http': proxy_url, 'https': proxy_url}
+
+
+def filter_proxy_list(proxies: list[str], label: str = '') -> list[str]:
+    """Filter a list of proxies for HTTPS capability using multi-threading.
+    Returns the list of active proxies."""
+    if not proxies:
+        return []
+    _count = [0]
+    _total = len(proxies)
+    _active: list[str] = []
+    _lock = threading.Lock()
+
+    def _test_batch(batch: list[str]):
+        for proxy in batch:
+            with _lock:
+                _count[0] += 1
+                idx = _count[0]
+            try:
+                requests.post('https://httpbin.org/post',
+                              proxies=build_proxy_dict(proxy),
+                              timeout=(connect_timeout, read_timeout))
+                with _lock:
+                    _active.append(proxy)
+            except Exception:
+                pass
+            if label:
+                print(f'{label} {idx}/{_total} {100*idx/_total:.1f}%   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
+
+    n_threads = min(thread_num, _total)
+    batch_size = _total // n_threads
+    threads = []
+    for i in range(n_threads):
+        start = i * batch_size
+        end = start + batch_size if i < (n_threads - 1) else None
+        t = threading.Thread(target=_test_batch, args=(proxies[start:end],))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
+    return _active
+
+
+def get_total_proxies() -> list[str]:
+    all_proxies = fetch_all_proxies(quiet=False)
     if all_proxies:
         print(f'collected {len(all_proxies)} proxies from all available sources')
         return list(all_proxies)
@@ -226,42 +290,12 @@ if len(total_proxies) > 10000:
     random.shuffle(total_proxies)
     total_proxies = total_proxies[:10000]
 
-active_proxies = []
-count = 0
-
-def build_proxy_dict(proxy: str) -> dict[str, str]:
-    """Build a requests-compatible proxies dict supporting http, https, socks4, socks5."""
-    if proxy.startswith('socks5://') or proxy.startswith('socks4://'):
-        return {'http': proxy, 'https': proxy}
-    proxy_url = 'http://' + proxy
-    return {'http': proxy_url, 'https': proxy_url}
-
-def filter_proxys(proxies: 'list[str]') -> None:
-    global count
-    for proxy in proxies:
-        count = count + 1
-        try:
-            requests.post('https://httpbin.org/post',
-                          proxies=build_proxy_dict(proxy),
-                          timeout=(connect_timeout, read_timeout))
-            active_proxies.append(proxy)
-        except:
-            pass
-        print(f'{pbar(count, len(total_proxies), hits=None, view_increase=None)} {100*count/len(total_proxies):.1f}%   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
+known_proxies: set[str] = set(total_proxies)  # track all ever-seen proxies for dedup
+max_consecutive_fails = 3  # remove proxy after this many consecutive failures
 
 start_filter_time = datetime.now()
 print('\nfiltering active HTTPS proxies using https://httpbin.org/post ...')
-thread_proxy_num = len(total_proxies) // thread_num
-threads = []
-for i in range(thread_num):
-    # calculate the start and end index of the proxies that this thread needs to process
-    start = i * thread_proxy_num
-    end = start + thread_proxy_num if i < (thread_num - 1) else None  # the last thread processes the remaining proxies
-    thread = threading.Thread(target=filter_proxys, args=(total_proxies[start:end],))
-    thread.start()
-    threads.append(thread)
-for thread in threads:
-    thread.join()  # wait for all threads to finish
+active_proxies = filter_proxy_list(total_proxies, label='filter')
 filter_cost_seconds = int((datetime.now()-start_filter_time).total_seconds())
 print(f'\nsuccessfully filter {len(active_proxies)} HTTPS-capable active proxies using {time(filter_cost_seconds)}')
 
@@ -281,14 +315,16 @@ except Exception as e:
     print(f'Failed to get initial view count: {e}')
     sys.exit(1)
 
+fail_counter: dict[str, int] = {}  # proxy -> consecutive fail count
+
 while True:
     reach_target = False
     start_time = datetime.now()
-    
-    # send POST click request for each proxy
+    dead_this_round: list[str] = []
+
     for i, proxy in enumerate(active_proxies):
         try:
-            if i % update_pbar_count == 0:  # update progress bar
+            if i % update_pbar_count == 0:
                 print(f'{pbar(current, target, successful_hits, current - initial_view_count)} updating view count...', end='' if IS_TTY else '\n', flush=not IS_TTY)
                 info = fetch_video_info(bv)
                 current = info['stat']['view']
@@ -312,13 +348,56 @@ while True:
                               'sub_type': '0'
                           })
             successful_hits += 1
+            fail_counter[proxy] = 0
             print(f'{pbar(current, target, successful_hits, current - initial_view_count)} proxy({i+1}/{len(active_proxies)}) success   ', end='' if IS_TTY else '\n', flush=not IS_TTY)
-        except:  # proxy connect timeout
+        except Exception:
+            fails = fail_counter.get(proxy, 0) + 1
+            fail_counter[proxy] = fails
+            if fails >= max_consecutive_fails:
+                dead_this_round.append(proxy)
             print(f'{pbar(current, target, successful_hits, current - initial_view_count)} proxy({i+1}/{len(active_proxies)}) fail      ', end='' if IS_TTY else '\n', flush=not IS_TTY)
 
-    if reach_target:  # reach target view count
+    # Remove dead proxies
+    if dead_this_round:
+        active_set = set(active_proxies)
+        for p in dead_this_round:
+            active_set.discard(p)
+            fail_counter.pop(p, None)
+        active_proxies = list(active_set)
+        print(f'removed {len(dead_this_round)} dead proxies, {len(active_proxies)} remaining')
+
+    if reach_target:
         break
-    remain_seconds = int(round_time-(datetime.now()-start_time).total_seconds())
+
+    remain_seconds = int(round_time - (datetime.now() - start_time).total_seconds())
+
+    # --- Incremental proxy refresh during wait ---
+    if remain_seconds > 30:
+        print(f'refreshing proxy pool during wait ({remain_seconds}s available)...')
+        try:
+            new_pool = fetch_all_proxies(quiet=True)
+            new_candidates = list(new_pool - known_proxies)
+            if new_candidates:
+                random.shuffle(new_candidates)
+                if len(new_candidates) > 2000:
+                    new_candidates = new_candidates[:2000]
+                print(f'found {len(new_candidates)} new proxy candidates, testing...')
+                newly_active = filter_proxy_list(new_candidates, label='refresh')
+                known_proxies.update(new_candidates)
+                if newly_active:
+                    active_set = set(active_proxies)
+                    added = [p for p in newly_active if p not in active_set]
+                    active_proxies.extend(added)
+                    print(f'added {len(added)} new active proxies, pool now {len(active_proxies)}')
+                else:
+                    print('no new active proxies found in this refresh')
+            else:
+                print('no new proxy candidates found')
+        except Exception as e:
+            print(f'proxy refresh failed: {e}')
+
+        remain_seconds = int(round_time - (datetime.now() - start_time).total_seconds())
+
     if remain_seconds > 0:
         for second in reversed(range(remain_seconds)):
             print(f'{pbar(current, target, successful_hits, current - initial_view_count)} next round: {time(second)}          ', end='' if IS_TTY else '\n', flush=not IS_TTY)
