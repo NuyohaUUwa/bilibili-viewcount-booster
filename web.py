@@ -27,6 +27,7 @@ _RE_FILTER = re.compile(r'successfully filter (\d+)')
 _RE_COLLECTED = re.compile(r'collected (\d+) proxies')
 _RE_REMOVED = re.compile(r'removed (\d+) dead proxies, (\d+) remaining')
 _RE_POOL_NOW = re.compile(r'pool now (\d+)')
+_RE_BV_IN_URL = re.compile(r'(BV[0-9A-Za-z]{10})', re.IGNORECASE)
 
 
 class TaskState:
@@ -64,6 +65,10 @@ def _write_history(task: TaskState):
     if task.history_written:
         return
     task.history_written = True
+    try:
+        os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+    except Exception:
+        pass
     s = task.status
     elapsed = s.get("elapsed", int(_time.time() - task.started_at))
     record = {
@@ -86,6 +91,21 @@ def _write_history(task: TaskState):
             f.write(json.dumps(record, ensure_ascii=False) + '\n')
     except Exception:
         pass
+
+
+def _extract_bv_or_raw(text: str) -> str:
+    """Allow user to paste full video URL; try to extract BV号."""
+    t = (text or "").strip()
+    if not t:
+        return t
+    lower = t.lower()
+    # 已经是 BV / AV / 纯数字，就直接用
+    if lower.startswith("bv") or lower.startswith("av") or t.isdigit():
+        return t
+    m = _RE_BV_IN_URL.search(t)
+    if m:
+        return m.group(1)
+    return t
 
 
 def get_script_dir():
@@ -209,7 +229,8 @@ def index():
 @app.route("/start", methods=["POST"])
 def start():
     data = request.get_json() or {}
-    bv = (data.get("bv") or "").strip()
+    bv_raw = (data.get("bv") or "").strip()
+    bv = _extract_bv_or_raw(bv_raw)
     target = data.get("target")
     if not bv:
         return jsonify({"ok": False, "message": "BV/AV id is required"}), 400
@@ -244,6 +265,33 @@ def list_tasks():
     with tasks_lock:
         summaries = [t.to_summary() for t in tasks.values()]
     return jsonify(summaries)
+
+
+@app.route("/history")
+def history():
+    """Return latest run record per BV (only newest for each video)."""
+    latest_by_bv: dict[str, dict] = {}
+    try:
+        with open(HISTORY_PATH, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                bv = rec.get("bv")
+                if not bv:
+                    continue
+                # 同一 BV 始终保留最新（文件是追加写入的，后面覆盖前面）
+                latest_by_bv[bv] = rec
+    except FileNotFoundError:
+        pass
+    records = list(latest_by_bv.values())
+    # 按结束时间倒序
+    records.sort(key=lambda r: r.get("finished_at", "") or "", reverse=True)
+    return jsonify(records)
 
 
 @app.route("/stream/<task_id>")

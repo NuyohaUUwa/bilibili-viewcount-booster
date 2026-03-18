@@ -45,12 +45,22 @@
   <h1>B站播放量刷量</h1>
 
   <div class="new-task">
-    <input type="text" id="bv" placeholder="BV号或AV号" />
+    <input type="text" id="bv" placeholder="BV号或AV号，或直接粘贴视频链接" />
     <input type="number" id="target" placeholder="目标播放量" min="1" value="1000" />
     <button id="btnAdd">添加任务</button>
   </div>
 
   <div id="taskList"><div class="no-tasks">暂无任务</div></div>
+
+  <div class="history-section" style="margin-top:24px;">
+    <h2 style="font-size:1.1rem; margin-bottom:12px; display:flex; align-items:center; gap:10px;">
+      历史记录
+      <button id="btnRefreshHistory" style="padding:4px 12px; border:1px solid #ccc; border-radius:5px; background:#fff; font-size:12px; cursor:pointer;">
+        刷新
+      </button>
+    </h2>
+    <div id="historyContainer"><div style="color:#999; font-size:13px; padding:20px 0; text-align:center;">暂无历史记录</div></div>
+  </div>
 
 <script>
 const bvInput = document.getElementById('bv');
@@ -257,6 +267,51 @@ async function removeTask(taskId) {
   }
 }
 
+const historyContainer = document.getElementById('historyContainer');
+const btnRefreshHistory = document.getElementById('btnRefreshHistory');
+
+async function loadHistory() {
+  try {
+    const res = await fetch('/history');
+    const list = await res.json();
+    if (!Array.isArray(list) || !list.length) {
+      historyContainer.innerHTML = '<div style="color:#999; font-size:13px; padding:20px 0; text-align:center;">暂无历史记录</div>';
+      return;
+    }
+    let html = '<table style="width:100%; border-collapse:collapse; font-size:13px; background:#fff; border-radius:8px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06);"><thead><tr>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">BV号</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">目标</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">状态</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">运行时长</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">当前播放量</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">播放增量</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">成功次数</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">开始时间</th>'
+      + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">结束时间</th>'
+      + '</tr></thead><tbody>';
+    for (const r of list) {
+      const phase = r.phase === 'finished' ? '已完成' : (r.phase === 'stopped' ? '已停止' : (r.phase || ''));
+      html += `<tr style="border-top:1px solid #eee;">
+        <td style="padding:7px 10px;">${r.bv || ''}</td>
+        <td style="padding:7px 10px;">${r.target ?? ''}</td>
+        <td style="padding:7px 10px; color:${r.phase === 'finished' ? '#0a7' : r.phase === 'stopped' ? '#c33' : '#333'}; font-weight:500;">${phase}</td>
+        <td style="padding:7px 10px;">${r.elapsed_fmt || ''}</td>
+        <td style="padding:7px 10px;">${r.current_views ?? ''}</td>
+        <td style="padding:7px 10px;">+${r.views_increase ?? 0}</td>
+        <td style="padding:7px 10px;">${r.hits ?? 0}</td>
+        <td style="padding:7px 10px;">${r.started_at || ''}</td>
+        <td style="padding:7px 10px;">${r.finished_at || ''}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    historyContainer.innerHTML = html;
+  } catch (e) {
+    historyContainer.innerHTML = '<div style="color:#c33; font-size:13px; padding:20px 0; text-align:center;">历史记录加载失败</div>';
+  }
+}
+
+btnRefreshHistory.onclick = loadHistory;
+
 (async function init() {
   try {
     const res = await fetch('/tasks');
@@ -271,6 +326,7 @@ async function removeTask(taskId) {
       if (s.running) { connectStream(s.id); startTimerTick(s.id); }
     }
   } catch(_) {}
+  loadHistory();
 })();
 </script>
 </body>
