@@ -91,6 +91,16 @@ function classifyLine(line) {
   return '';
 }
 
+function escapeHtml(value) {
+  const str = String(value ?? '');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function fmtTime(sec) {
   if (sec < 60) return sec + 's';
   if (sec < 3600) return Math.floor(sec/60) + 'min ' + (sec%60) + 's';
@@ -290,17 +300,20 @@ async function loadHistory() {
       + '<th style="background:#f0f0f0; padding:8px 10px; text-align:left; font-weight:600; font-size:12px; color:#555;">结束时间</th>'
       + '</tr></thead><tbody>';
     for (const r of list) {
-      const phase = r.phase === 'finished' ? '已完成' : (r.phase === 'stopped' ? '已停止' : (r.phase || ''));
+      const phaseRaw = r.phase === 'finished' ? '已完成' : (r.phase === 'stopped' ? '已停止' : (r.phase || ''));
+      const phaseText = escapeHtml(phaseRaw);
+      const incVal = Number(r.views_increase ?? 0);
+      const incText = (incVal > 0 ? '+' : '') + incVal;
       html += `<tr style="border-top:1px solid #eee;">
-        <td style="padding:7px 10px;">${r.bv || ''}</td>
-        <td style="padding:7px 10px;">${r.target ?? ''}</td>
-        <td style="padding:7px 10px; color:${r.phase === 'finished' ? '#0a7' : r.phase === 'stopped' ? '#c33' : '#333'}; font-weight:500;">${phase}</td>
-        <td style="padding:7px 10px;">${r.elapsed_fmt || ''}</td>
-        <td style="padding:7px 10px;">${r.current_views ?? ''}</td>
-        <td style="padding:7px 10px;">+${r.views_increase ?? 0}</td>
-        <td style="padding:7px 10px;">${r.hits ?? 0}</td>
-        <td style="padding:7px 10px;">${r.started_at || ''}</td>
-        <td style="padding:7px 10px;">${r.finished_at || ''}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.bv || '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.target ?? '')}</td>
+        <td style="padding:7px 10px; color:${r.phase === 'finished' ? '#0a7' : r.phase === 'stopped' ? '#c33' : '#333'}; font-weight:500;">${phaseText}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.elapsed_fmt || '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.current_views ?? '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(incText)}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.hits ?? '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.started_at || '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.finished_at || '')}</td>
       </tr>`;
     }
     html += '</tbody></table>';
