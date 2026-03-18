@@ -311,7 +311,7 @@ async function loadHistory() {
         <td style="padding:7px 10px;">${escapeHtml(r.elapsed_fmt || '')}</td>
         <td style="padding:7px 10px;">${escapeHtml(r.current_views ?? '')}</td>
         <td style="padding:7px 10px;">${escapeHtml(incText)}</td>
-        <td style="padding:7px 10px;">${escapeHtml(r.hits ?? '')}</td>
+        <td style="padding:7px 10px;">${escapeHtml(r.hits ?? 0)}</td>
         <td style="padding:7px 10px;">${escapeHtml(r.started_at || '')}</td>
         <td style="padding:7px 10px;">${escapeHtml(r.finished_at || '')}</td>
       </tr>`;
